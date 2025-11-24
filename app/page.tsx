@@ -1,103 +1,218 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect } from "react";
+import { ref, onValue, runTransaction } from "firebase/database";
+import { database } from "./firebase";
+import confetti from 'canvas-confetti';
+
+const TOTAL_CLICKS_GOAL = 100000000; // 100 million clicks
+
+interface Particle {
+  id: number;
+  x: number;
+  y: number;
+}
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [clickCount, setClickCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isGoalReached, setIsGoalReached] = useState(false);
+  const [showWinnerModal, setShowWinnerModal] = useState(false);
+  const [winnerEmail, setWinnerEmail] = useState("");
+  const [isWinnerDeclared, setIsWinnerDeclared] = useState(false);
+  const [emailSubmitted, setEmailSubmitted] = useState(false);
+  const [particles, setParticles] = useState<Particle[]>([]);
+  const [isConfettiShown, setIsConfettiShown] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    const clickRef = ref(database, 'clicks');
+    const winnerRef = ref(database, 'winner');
+
+    const unsubscribeClicks = onValue(clickRef, (snapshot) => {
+      const currentCount = snapshot.val()?.count || 0;
+      setClickCount(currentCount);
+      if (currentCount >= TOTAL_CLICKS_GOAL && !isWinnerDeclared) {
+        setIsGoalReached(true);
+        setShowWinnerModal(true);
+      }
+      setIsLoading(false);
+    }, (error) => {
+      // Production: log to an error reporting service
+      setIsLoading(false);
+    });
+
+    const unsubscribeWinner = onValue(winnerRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setIsWinnerDeclared(true);
+        setShowWinnerModal(false);
+      }
+    }, (error) => {
+      // Production: log to an error reporting service
+    });
+
+    if (isGoalReached && !isConfettiShown) {
+      confetti({
+        particleCount: 150,
+        spread: 90,
+        origin: { y: 0.6 }
+      });
+      setIsConfettiShown(true);
+    }
+
+    return () => {
+      unsubscribeClicks();
+      unsubscribeWinner();
+    };
+  }, [isGoalReached, isConfettiShown, isWinnerDeclared]);
+
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (isGoalReached) {
+      return;
+    }
+
+    const newParticle = {
+      id: Date.now(),
+      x: e.clientX + (Math.random() - 0.5) * 40,
+      y: e.clientY - 50,
+    };
+    setParticles(prev => [...prev, newParticle]);
+    setTimeout(() => {
+      setParticles(prev => prev.filter(p => p.id !== newParticle.id));
+    }, 1500);
+
+    const clickRef = ref(database, 'clicks');
+    runTransaction(clickRef, (currentData) => {
+      if (currentData === null || typeof currentData.count !== 'number') {
+        return { count: 1 };
+      }
+      if (currentData.count < TOTAL_CLICKS_GOAL) {
+        currentData.count++;
+      }
+      return currentData;
+    }).catch((error) => {
+      // Production: log to an error reporting service
+    });
+  };
+
+  const handleEmailSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!winnerEmail) return;
+
+    const winnerRef = ref(database, 'winner');
+    runTransaction(winnerRef, (currentData) => {
+      if (currentData === null) {
+        return { email: winnerEmail, timestamp: Date.now() };
+      }
+      return;
+    }).then(() => {
+        setEmailSubmitted(true);
+        setShowWinnerModal(false);
+    }).catch((error) => {
+      // Production: log to an error reporting service
+    });
+  };
+
+  const remainingClicks = TOTAL_CLICKS_GOAL - clickCount;
+  const progressPercentage = (clickCount / TOTAL_CLICKS_GOAL) * 100;
+
+  return (
+    <div className="overflow-hidden flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
+      <div className="fixed top-0 left-0 w-full h-2 bg-gray-700 z-50">
+        <div 
+          className="h-full bg-cyan-400 transition-all duration-500 ease-out"
+          style={{ width: `${progressPercentage}%` }}
+        ></div>
+      </div>
+
+      {particles.map(p => (
+        <span 
+          key={p.id}
+          className="absolute text-cyan-400 font-bold text-2xl animate-float-up select-none"
+          style={{ left: p.x, top: p.y }}
+        >
+          +1
+        </span>
+      ))}
+
+      <h1 className="text-5xl font-extrabold mb-4 drop-shadow-lg tracking-wider z-10">The Final Click</h1>
+      <p className="text-xl mb-10 text-gray-300 animate-pulse z-10">Click the button! The last one to make it zero wins $500!</p>
+
+      <p className="text-xl mb-4 text-gray-400 z-10">Clicks Remaining</p>
+      <div className="text-8xl font-mono font-bold mb-16 text-cyan-400 drop-shadow-xl tabular-nums z-10 h-28 flex items-center justify-center">
+        {isLoading ? (
+          <div className="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-cyan-400"></div>
+        ) : (
+          remainingClicks > 0 ? remainingClicks.toLocaleString() : 0
+        )}
+      </div>
+
+      <button
+        onClick={handleClick}
+        disabled={isGoalReached || isWinnerDeclared}
+        className={`relative flex items-center justify-center w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 rounded-full transition-all duration-200 ease-in-out transform shadow-2xl overflow-hidden z-10
+          ${isGoalReached || isWinnerDeclared ? 'bg-gray-700 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-700 active:scale-95 focus:outline-none focus:ring-4 focus:ring-cyan-500 focus:ring-opacity-50 hover:scale-105'}
+        `}
+      >
+        {!(isGoalReached || isWinnerDeclared) && <span className="absolute inset-0 bg-cyan-500 opacity-25 animate-ping-slow rounded-full"></span>}
+        <span className="text-5xl sm:text-6xl md:text-7xl font-extrabold select-none z-10">
+          {isGoalReached || isWinnerDeclared ? 'GOAL!' : 'CLICK ME!'}
+        </span>
+      </button>
+
+      {showWinnerModal && (
+        <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-10 rounded-lg shadow-xl text-center">
+            <h2 className="text-4xl font-bold text-yellow-400 mb-4">Congratulations!</h2>
+            <p className="text-lg mb-6">You are the final clicker! Please enter your email to claim your prize.</p>
+            <form onSubmit={handleEmailSubmit}>
+              <input
+                type="email"
+                value={winnerEmail}
+                onChange={(e) => setWinnerEmail(e.target.value)}
+                placeholder="your.email@example.com"
+                className="w-full px-4 py-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 mb-4"
+                required
+              />
+              <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">
+                Claim Prize
+              </button>
+            </form>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      )}
+
+      {emailSubmitted && (
+         <p className="mt-8 text-3xl font-bold text-green-400 z-10">Thank you! We will contact you shortly.</p>
+      )}
+
+      <style jsx>{`
+        @keyframes ping-slow {
+          0%, 100% {
+            transform: scale(0.8);
+            opacity: 0.2;
+          }
+          50% {
+            transform: scale(1.1);
+            opacity: 0.7;
+          }
+        }
+        .animate-ping-slow {
+          animation: ping-slow 3s infinite;
+        }
+        @keyframes float-up {
+          0% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(-80px);
+            opacity: 0;
+          }
+        }
+        .animate-float-up {
+          animation: float-up 1.5s ease-out forwards;
+        }
+      `}</style>
     </div>
   );
 }
