@@ -28,7 +28,7 @@ Follow these steps to get the project running on your local machine.
 1.  **Clone the repository**:
 
     ```bash
-    git clone <YOUR_REPOSITORY_URL>
+    git clone https://github.com/katayama8000/the-final-click/
     cd the-final-click
     ```
 
