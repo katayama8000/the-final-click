@@ -40,3 +40,7 @@ firebase-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Firebase
+.firebase/
+next_dist/
